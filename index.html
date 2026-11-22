@@ -1,0 +1,1457 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-HK">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="極速記帳" />
+  <meta name="theme-color" content="#F6F7F9" />
+  <title>極速記帳 — 每日開支與預支自動抵銷</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    * {
+      -webkit-tap-highlight-color: transparent;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "PingFang HK", "Noto Sans TC", sans-serif;
+      background-color: #F2F4F7;
+      color: #111827;
+      margin: 0;
+      padding: 0;
+      overscroll-behavior-y: none;
+    }
+    .app-shell {
+      max-width: 460px;
+      min-height: 100dvh;
+      margin: 0 auto;
+      background-color: #F6F7F9;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      box-shadow: 0 0 40px rgba(15, 23, 42, 0.06);
+    }
+    .safe-top {
+      padding-top: calc(12px + var(--safe-top));
+    }
+    .safe-bottom {
+      padding-bottom: calc(10px + var(--safe-bottom));
+    }
+    .numpad-btn {
+      user-select: none;
+      transition: transform 0.08s ease, background-color 0.1s ease;
+    }
+    .numpad-btn:active {
+      transform: scale(0.95);
+      background-color: #E5E7EB;
+    }
+    .cat-btn {
+      user-select: none;
+      transition: transform 0.1s ease, border-color 0.15s ease, background-color 0.15s ease;
+    }
+    .cat-btn:active {
+      transform: scale(0.96);
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(16px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .animate-slide-up {
+      animation: slideUp 0.2s ease-out;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Top Header & Sync Status -->
+    <header class="safe-top px-4 pb-2 bg-white border-b border-slate-100 sticky top-0 z-20">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-600 text-white text-sm font-bold shadow-sm">⚡</span>
+          <div>
+            <h1 class="text-base font-bold text-slate-900 leading-tight">極速記帳</h1>
+            <p id="header-cycle-label" class="text-[11px] text-slate-500 font-medium leading-tight">本期：--</p>
+          </div>
+        </div>
+        <button id="sync-status-btn" type="button" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition">
+          <span id="sync-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+          <span id="sync-label">本地模式</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Scrollable Content -->
+    <main class="flex-1 overflow-y-auto no-scrollbar pb-24">
+      <!-- TAB 1: QUICK ENTRY -->
+      <section id="tab-log" class="px-4 pt-3 space-y-3">
+        <!-- Live Budget & Rollover Summary Card -->
+        <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-slate-100">
+          <div class="grid grid-cols-2 gap-3 items-start">
+            <div>
+              <div class="text-[11px] font-medium text-slate-500 flex items-center gap-1">
+                <span>扣埋預支實際可使</span>
+              </div>
+              <div id="kpi-real-remaining" class="text-2xl font-extrabold tabular-nums tracking-tight text-emerald-600 mt-0.5">HK$5,000</div>
+              <div id="kpi-orig-remaining" class="text-[11px] text-slate-400 mt-0.5 tabular-nums">原預算剩餘 HK$5,000</div>
+            </div>
+            <div class="text-right">
+              <div class="text-[11px] font-medium text-slate-500">本期已使 / 預算</div>
+              <div class="text-base font-bold tabular-nums text-slate-800 mt-1">
+                <span id="kpi-spent">HK$0</span>
+                <span class="text-xs font-normal text-slate-400">/ <span id="kpi-budget">$5,000</span></span>
+              </div>
+              <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-2">
+                <div id="kpi-progress-bar" class="h-full bg-emerald-500 rounded-full transition-all duration-300" style="width: 0%"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Carry-over Debt Alert Pill -->
+          <div id="debt-banner" class="hidden mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
+            <div class="flex items-center gap-1.5 text-amber-700 font-medium">
+              <span class="inline-block w-2 h-2 rounded-full bg-amber-500"></span>
+              <span id="debt-banner-text">上期結轉待補預支：HK$0</span>
+            </div>
+            <span id="debt-projected-text" class="text-[11px] font-semibold text-slate-500 tabular-nums"></span>
+          </div>
+        </div>
+
+        <!-- Amount Display & Optional Note/Date -->
+        <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-slate-100">
+          <div class="flex items-baseline justify-between border-b border-slate-100 pb-2.5">
+            <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">HK$</span>
+            <div id="amount-display" class="text-4xl font-extrabold tabular-nums text-slate-900 tracking-tight truncate">0</div>
+          </div>
+
+          <div class="flex items-center gap-2 mt-2.5">
+            <input id="note-input" type="text" maxlength="40" placeholder="備註（選填，例如：茶餐廳午餐）"
+              class="flex-1 text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:border-emerald-500 focus:bg-white transition" />
+            <input id="date-input" type="date"
+              class="w-[126px] text-xs bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-slate-700 focus:outline-none focus:border-emerald-500 focus:bg-white transition" />
+          </div>
+        </div>
+
+        <!-- Quick Category Grid (1-Tap Save!) -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5 px-0.5">
+            <span class="text-xs font-semibold text-slate-600">輸入金額後，點一下分類即刻儲存</span>
+            <span id="quick-hint" class="text-[11px] text-emerald-600 font-medium opacity-0 transition-opacity">可點選分類儲存</span>
+          </div>
+          <div id="category-grid" class="grid grid-cols-3 gap-2"></div>
+        </div>
+
+        <!-- Thumb-friendly Numpad -->
+        <div class="bg-white rounded-2xl p-2 shadow-sm border border-slate-100">
+          <div id="numpad-grid" class="grid grid-cols-3 gap-1.5">
+            <button type="button" data-key="1" class="numpad-btn h-12 rounded-xl bg-slate-50 text-xl font-bold text-slate-800">1</button>
+            <button type="button" data-key="2" class="numpad-btn h-12 rounded-xl bg-slate-50 text-xl font-bold text-slate-800">2</button>
+            <button type="button" data-key="3" class="numpad-btn h-12 rounded-xl bg-slate-50 text-xl font-bold text-slate-800">3</button>
+            <button type="button" data-key="4" class="numpad-btn h-12 rounded-xl bg-slate-50 text-xl font-bold text-slate-800">4</button>
+            <button type="button" data-key="5" class="numpad-btn h-12 rounded-xl bg-slate-50 text-xl font-bold text-slate-800">5</button>
+            <button type="button" data-key="6" class="numpad-btn h-12 rounded-xl bg-slate-50 text-xl font-bold text-slate-800">6</button>
+            <button type="button" data-key="7" class="numpad-btn h-12 rounded-xl bg-slate-50 text-xl font-bold text-slate-800">7</button>
+            <button type="button" data-key="8" class="numpad-btn h-12 rounded-xl bg-slate-50 text-xl font-bold text-slate-800">8</button>
+            <button type="button" data-key="9" class="numpad-btn h-12 rounded-xl bg-slate-50 text-xl font-bold text-slate-800">9</button>
+            <button type="button" data-key="." class="numpad-btn h-12 rounded-xl bg-slate-50 text-xl font-bold text-slate-800">.</button>
+            <button type="button" data-key="0" class="numpad-btn h-12 rounded-xl bg-slate-50 text-xl font-bold text-slate-800">0</button>
+            <button type="button" data-key="BACK" class="numpad-btn h-12 rounded-xl bg-slate-100 text-lg font-bold text-slate-600" aria-label="退格">⌫</button>
+          </div>
+          <div class="flex justify-end mt-1.5">
+            <button id="clear-amount-btn" type="button" class="text-xs text-slate-400 hover:text-slate-600 px-2 py-1 font-medium">清空金額</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: HISTORY & MONTHLY SETTLEMENT -->
+      <section id="tab-history" class="hidden px-4 pt-3 space-y-3">
+        <!-- Billing Cycle Switcher -->
+        <div class="bg-white rounded-2xl p-2.5 shadow-sm border border-slate-100 flex items-center justify-between">
+          <button id="prev-cycle-btn" type="button" class="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition">◀ 上一期</button>
+          <div class="text-center">
+            <div id="hist-cycle-title" class="text-sm font-bold text-slate-900">本期</div>
+            <div id="hist-cycle-range" class="text-[11px] text-slate-500 tabular-nums">--</div>
+          </div>
+          <button id="next-cycle-btn" type="button" class="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition disabled:opacity-40">下一期 ▶</button>
+        </div>
+
+        <!-- Settlement & Rollover Breakdown Card -->
+        <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide">結算與預支抵銷明細</h2>
+            <span id="hist-cycle-badge" class="text-[11px] px-2 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-700">進行中</span>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2.5 pt-1">
+            <div class="bg-slate-50 rounded-xl p-2.5">
+              <div class="text-[11px] text-slate-500">本期預算</div>
+              <div id="hist-budget" class="text-base font-bold text-slate-900 tabular-nums mt-0.5">HK$5,000</div>
+            </div>
+            <div class="bg-slate-50 rounded-xl p-2.5">
+              <div class="text-[11px] text-slate-500">本期總開支</div>
+              <div id="hist-spent" class="text-base font-bold text-slate-900 tabular-nums mt-0.5">HK$0</div>
+            </div>
+            <div class="bg-amber-50/70 rounded-xl p-2.5">
+              <div class="text-[11px] text-amber-800">上期結轉待補預支</div>
+              <div id="hist-carry-in" class="text-base font-bold text-amber-700 tabular-nums mt-0.5">HK$0</div>
+            </div>
+            <div id="hist-net-box" class="bg-emerald-50/70 rounded-xl p-2.5">
+              <div id="hist-net-label" class="text-[11px] text-emerald-800">扣埋預支實際可使</div>
+              <div id="hist-net-value" class="text-base font-bold text-emerald-700 tabular-nums mt-0.5">HK$5,000</div>
+            </div>
+          </div>
+
+          <div id="hist-settlement-note" class="text-xs rounded-xl px-3 py-2 bg-slate-50 text-slate-600 leading-relaxed">
+            月底結算時，若本期有剩餘預算，會自動先抵銷待補預支；還清後多出的金額將歸入儲蓄，下期維持原預算。
+          </div>
+        </div>
+
+        <!-- Category Breakdown -->
+        <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
+          <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">分類開支佔比</h2>
+          <div id="category-breakdown" class="space-y-2.5"></div>
+        </div>
+
+        <!-- Expense List -->
+        <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-xs font-bold text-slate-500 uppercase tracking-wide">本期開支紀錄</h2>
+            <span id="hist-count" class="text-xs text-slate-400">0 筆</span>
+          </div>
+          <div id="expense-list" class="space-y-3"></div>
+        </div>
+      </section>
+
+      <!-- TAB 3: SETTINGS & GOOGLE SHEETS -->
+      <section id="tab-settings" class="hidden px-4 pt-3 space-y-3">
+        <!-- Budget & Reset Day -->
+        <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-3">
+          <h2 class="text-sm font-bold text-slate-900">預算與結算日</h2>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label for="setting-budget" class="block text-xs font-medium text-slate-600 mb-1">每月預算 (HK$)</label>
+              <input id="setting-budget" type="number" min="1" step="100"
+                class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 focus:outline-none focus:border-emerald-500" />
+            </div>
+            <div>
+              <label for="setting-reset-day" class="block text-xs font-medium text-slate-600 mb-1">每月結算日</label>
+              <select id="setting-reset-day"
+                class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900 bg-white focus:outline-none focus:border-emerald-500"></select>
+            </div>
+          </div>
+          <button id="save-budget-btn" type="button"
+            class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold transition">
+            儲存預算與結算日
+          </button>
+          <p class="text-[11px] text-slate-400 leading-relaxed">
+            例如設為「每月 15 號」，每期計算範圍即為當月 15 號至下月 14 號。更改後所有期數的預支抵銷都會自動重算。
+          </p>
+        </div>
+
+        <!-- Category Management -->
+        <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-3">
+          <h2 class="text-sm font-bold text-slate-900">自訂常用分類</h2>
+          <div id="settings-cat-list" class="flex flex-wrap gap-2"></div>
+          <div class="flex gap-2 pt-1">
+            <input id="new-cat-emoji" type="text" maxlength="4" placeholder="☕"
+              class="w-12 text-center rounded-xl border border-slate-200 py-2 text-sm focus:outline-none focus:border-emerald-500" />
+            <input id="new-cat-name" type="text" maxlength="10" placeholder="新分類名稱（如：咖啡）"
+              class="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-emerald-500" />
+            <button id="add-cat-btn" type="button"
+              class="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800 transition">新增</button>
+          </div>
+        </div>
+
+        <!-- Google Sheets Cloud Sync -->
+        <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-3">
+          <div class="flex items-center justify-between">
+            <h2 class="text-sm font-bold text-slate-900">Google Sheets 雲端同步</h2>
+            <span class="text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">Apps Script API</span>
+          </div>
+          <div class="space-y-2.5">
+            <div>
+              <label for="setting-api-url" class="block text-xs font-medium text-slate-600 mb-1">Google Apps Script Web App 網址</label>
+              <input id="setting-api-url" type="url" placeholder="https://script.google.com/macros/s/.../exec"
+                class="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-emerald-500" />
+            </div>
+            <div>
+              <label for="setting-pin" class="block text-xs font-medium text-slate-600 mb-1">個人安全 PIN 碼（只需輸入一次）</label>
+              <input id="setting-pin" type="password" placeholder="與 Code.gs 內的 SECRET_PIN 相同"
+                class="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:outline-none focus:border-emerald-500" />
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <button id="save-sync-btn" type="button"
+              class="py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold transition">
+              儲存並立即同步
+            </button>
+            <button id="show-gas-modal-btn" type="button"
+              class="py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition">
+              查看 Code.gs 教學
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400 leading-relaxed">
+            未填寫網址時會自動以手機本地模式運行；連接後每次記帳會即時更新畫面並在背景同步至你的 Google Sheet。
+          </p>
+        </div>
+
+        <!-- Data & Demo Tools -->
+        <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 space-y-2.5">
+          <h2 class="text-sm font-bold text-slate-900">資料工具與測試</h2>
+          <div class="grid grid-cols-2 gap-2">
+            <button id="load-demo-btn" type="button"
+              class="py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs font-semibold transition">
+              載入跨月預支示範
+            </button>
+            <button id="export-csv-btn" type="button"
+              class="py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition">
+              匯出 CSV 備份
+            </button>
+          </div>
+          <button id="clear-data-btn" type="button"
+            class="w-full py-2 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-semibold transition">
+            清除全部本地紀錄
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Tab Navigation -->
+    <nav class="safe-bottom bg-white/95 backdrop-blur border-t border-slate-200 fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[460px] z-20">
+      <div class="grid grid-cols-3 pt-1.5">
+        <button type="button" data-tab="log" class="tab-nav-btn flex flex-col items-center py-1 text-emerald-600 font-semibold">
+          <span class="text-lg leading-none">➕</span>
+          <span class="text-[11px] mt-1">極速記帳</span>
+        </button>
+        <button type="button" data-tab="history" class="tab-nav-btn flex flex-col items-center py-1 text-slate-400 font-medium">
+          <span class="text-lg leading-none">📊</span>
+          <span class="text-[11px] mt-1">紀錄與月結</span>
+        </button>
+        <button type="button" data-tab="settings" class="tab-nav-btn flex flex-col items-center py-1 text-slate-400 font-medium">
+          <span class="text-lg leading-none">⚙️</span>
+          <span class="text-[11px] mt-1">設定與雲端</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Toast Notification with Undo -->
+    <div id="toast" class="hidden fixed bottom-20 left-1/2 -translate-x-1/2 w-[90%] max-w-[420px] bg-slate-900 text-white text-xs px-4 py-3 rounded-2xl shadow-lg z-40 flex items-center justify-between gap-3 animate-slide-up">
+      <span id="toast-msg" class="font-medium truncate">已儲存</span>
+      <button id="toast-undo-btn" type="button" class="hidden shrink-0 text-emerald-400 font-bold hover:underline">復原</button>
+    </div>
+
+    <!-- Edit Expense Modal -->
+    <div id="edit-modal" class="hidden fixed inset-0 bg-slate-900/50 z-50 flex items-end sm:items-center justify-center p-4">
+      <div class="bg-white w-full max-w-[420px] rounded-2xl p-4 space-y-3 shadow-xl animate-slide-up">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-bold text-slate-900">修改開支紀錄</h3>
+          <button id="close-edit-modal" type="button" class="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+        </div>
+        <div class="space-y-2.5">
+          <div>
+            <label for="edit-amount" class="block text-xs font-medium text-slate-600 mb-1">金額 (HK$)</label>
+            <input id="edit-amount" type="number" step="0.01" min="0.01"
+              class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold text-slate-900" />
+          </div>
+          <div>
+            <label for="edit-category" class="block text-xs font-medium text-slate-600 mb-1">分類</label>
+            <select id="edit-category" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white"></select>
+          </div>
+          <div>
+            <label for="edit-date" class="block text-xs font-medium text-slate-600 mb-1">日期</label>
+            <input id="edit-date" type="date" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label for="edit-note" class="block text-xs font-medium text-slate-600 mb-1">備註</label>
+            <input id="edit-note" type="text" maxlength="40" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-2 pt-1">
+          <button id="delete-expense-btn" type="button" class="py-2.5 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-semibold">刪除此筆</button>
+          <button id="save-edit-btn" type="button" class="py-2.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-semibold">儲存修改</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirm Clear Modal -->
+    <div id="confirm-modal" class="hidden fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white w-full max-w-[360px] rounded-2xl p-4 space-y-3 shadow-xl animate-slide-up">
+        <h3 id="confirm-title" class="text-sm font-bold text-slate-900">確認操作</h3>
+        <p id="confirm-desc" class="text-xs text-slate-600 leading-relaxed"></p>
+        <div class="grid grid-cols-2 gap-2 pt-1">
+          <button id="confirm-cancel-btn" type="button" class="py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold">取消</button>
+          <button id="confirm-ok-btn" type="button" class="py-2 rounded-xl bg-rose-600 text-white text-xs font-semibold">確定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- GAS Code & Setup Guide Modal -->
+    <div id="gas-modal" class="hidden fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+      <div class="bg-white w-full max-w-[440px] max-h-[85dvh] rounded-2xl p-4 flex flex-col shadow-xl animate-slide-up">
+        <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+          <h3 class="text-sm font-bold text-slate-900">Google Sheets 5 分鐘設定教學</h3>
+          <button id="close-gas-modal" type="button" class="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+        </div>
+        <div class="overflow-y-auto py-3 space-y-3 text-xs text-slate-600 leading-relaxed">
+          <ol class="list-decimal pl-4 space-y-1.5">
+            <li>建立一個空白的 <strong>Google 試算表</strong>（系統會自動建立 <code class="bg-slate-100 px-1 rounded">Expenses</code> 同 <code class="bg-slate-100 px-1 rounded">Settings</code> 分頁）。</li>
+            <li>在試算表頂部選單按 <strong>擴充功能 → Apps Script</strong>。</li>
+            <li>刪除原本程式碼，貼上以下 <code class="bg-slate-100 px-1 rounded">Code.gs</code>，並把頂部的 <code class="bg-slate-100 px-1 rounded">SECRET_PIN</code> 改成你自己的密碼。</li>
+            <li>按右上角 <strong>部署 → 新增部署作業 → 網頁應用程式</strong>，執行身分選「我」，誰可以存取選「所有人」，複製生成的 <strong>Web App 網址</strong> 貼回 App 設定即可。</li>
+          </ol>
+          <div class="relative">
+            <pre id="gas-code-block" class="bg-slate-900 text-slate-100 p-3 rounded-xl text-[11px] overflow-x-auto max-h-56 leading-normal"></pre>
+          </div>
+        </div>
+        <div class="pt-2 border-t border-slate-100 flex gap-2">
+          <button id="copy-gas-btn" type="button" class="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold">一鍵複製 Code.gs</button>
+          <button id="close-gas-modal-2" type="button" class="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold">關閉</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const STORAGE_KEY = 'quick_expense_pwa_v1';
+
+      const DEFAULT_CATEGORIES = [
+        { id: 'food', name: '餐飲', emoji: '🍜' },
+        { id: 'transport', name: '交通', emoji: '🚇' },
+        { id: 'shopping', name: '購物', emoji: '🛍️' },
+        { id: 'entertainment', name: '娛樂', emoji: '🎬' },
+        { id: 'daily', name: '日用品', emoji: '🧻' },
+        { id: 'misc', name: '訂閱／雜費', emoji: '📱' }
+      ];
+
+      const GAS_SOURCE_CODE = `// 貼到 Google Sheets -> 擴充功能 -> Apps Script (Code.gs)
+const SECRET_PIN = '1234'; // 請改成你自己的安全 PIN 碼
+
+function getOrInitSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let expSheet = ss.getSheetByName('Expenses');
+  if (!expSheet) {
+    expSheet = ss.insertSheet('Expenses');
+    expSheet.appendRow(['id', 'date', 'amount', 'category', 'note', 'createdAt']);
+  }
+  let setSheet = ss.getSheetByName('Settings');
+  if (!setSheet) {
+    setSheet = ss.insertSheet('Settings');
+    setSheet.appendRow(['key', 'value']);
+    setSheet.appendRow(['budget', '5000']);
+    setSheet.appendRow(['resetDay', '1']);
+  }
+  return { expSheet, setSheet };
+}
+
+function jsonOut(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doGet(e) {
+  const pin = (e && e.parameter && e.parameter.pin) || '';
+  if (pin !== SECRET_PIN) return jsonOut({ ok: false, error: 'PIN 碼錯誤' });
+
+  const { expSheet, setSheet } = getOrInitSheets();
+  const expRows = expSheet.getDataRange().getValues().slice(1);
+  const expenses = expRows
+    .filter(r => r[0])
+    .map(r => ({
+      id: String(r[0]),
+      date: r[1] instanceof Date ? Utilities.formatDate(r[1], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(r[1]),
+      amount: Number(r[2]) || 0,
+      category: String(r[3] || '其他'),
+      note: String(r[4] || ''),
+      createdAt: String(r[5] || '')
+    }));
+
+  const setRows = setSheet.getDataRange().getValues().slice(1);
+  const settings = {};
+  setRows.forEach(r => { if (r[0]) settings[String(r[0])] = String(r[1]); });
+
+  return jsonOut({ ok: true, expenses, settings });
+}
+
+function doPost(e) {
+  try {
+    const payload = JSON.parse(e.postData.contents);
+    if (payload.pin !== SECRET_PIN) return jsonOut({ ok: false, error: 'PIN 碼錯誤' });
+
+    const { expSheet, setSheet } = getOrInitSheets();
+    const action = payload.action;
+
+    if (action === 'add') {
+      const it = payload.expense;
+      expSheet.appendRow([it.id, it.date, Number(it.amount), it.category, it.note || '', it.createdAt || new Date().toISOString()]);
+      return jsonOut({ ok: true });
+    }
+
+    if (action === 'update' || action === 'delete') {
+      const data = expSheet.getDataRange().getValues();
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0]) === String(payload.id)) {
+          if (action === 'delete') {
+            expSheet.deleteRow(i + 1);
+          } else {
+            const it = payload.expense;
+            expSheet.getRange(i + 1, 2, 1, 4).setValues([[it.date, Number(it.amount), it.category, it.note || '']]);
+          }
+          return jsonOut({ ok: true });
+        }
+      }
+      return jsonOut({ ok: false, error: '找不到紀錄' });
+    }
+
+    if (action === 'saveSettings') {
+      const rows = setSheet.getDataRange().getValues();
+      const map = { budget: String(payload.budget), resetDay: String(payload.resetDay) };
+      if (payload.categories) map.categories = JSON.stringify(payload.categories);
+      Object.keys(map).forEach(k => {
+        let found = false;
+        for (let i = 1; i < rows.length; i++) {
+          if (String(rows[i][0]) === k) {
+            setSheet.getRange(i + 1, 2).setValue(map[k]);
+            found = true;
+            break;
+          }
+        }
+        if (!found) setSheet.appendRow([k, map[k]]);
+      });
+      return jsonOut({ ok: true });
+    }
+
+    return jsonOut({ ok: false, error: '未知操作' });
+  } catch (err) {
+    return jsonOut({ ok: false, error: String(err) });
+  }
+}`;
+
+      // --- State Management ---
+      let state = {
+        budget: 5000,
+        resetDay: 1,
+        categories: DEFAULT_CATEGORIES.slice(),
+        expenses: [],
+        apiUrl: '',
+        pin: '',
+        activeTab: 'log',
+        amountStr: '0',
+        selectedCycleOffset: 0, // 0 = current cycle, -1 = previous, etc.
+        editingId: null,
+        lastAddedId: null,
+        syncStatus: 'local' // 'local' | 'synced' | 'syncing' | 'error'
+      };
+
+      function loadState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (typeof parsed.budget === 'number' && parsed.budget > 0) state.budget = parsed.budget;
+            if (typeof parsed.resetDay === 'number' && parsed.resetDay >= 1 && parsed.resetDay <= 28) state.resetDay = parsed.resetDay;
+            if (Array.isArray(parsed.categories) && parsed.categories.length > 0) state.categories = parsed.categories;
+            if (Array.isArray(parsed.expenses)) state.expenses = parsed.expenses;
+            if (typeof parsed.apiUrl === 'string') state.apiUrl = parsed.apiUrl;
+            if (typeof parsed.pin === 'string') state.pin = parsed.pin;
+          }
+        } catch (err) {
+          // Ignore storage restrictions
+        }
+        state.syncStatus = state.apiUrl ? 'synced' : 'local';
+      }
+
+      function saveState() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            budget: state.budget,
+            resetDay: state.resetDay,
+            categories: state.categories,
+            expenses: state.expenses,
+            apiUrl: state.apiUrl,
+            pin: state.pin
+          }));
+        } catch (err) {
+          // Ignore storage restrictions
+        }
+      }
+
+      // --- Date & Billing Cycle Helpers ---
+      function pad2(n) {
+        return String(n).padStart(2, '0');
+      }
+
+      function toDateStr(d) {
+        return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      }
+
+      function parseDateStr(str) {
+        const parts = String(str || '').split('-').map(Number);
+        if (parts.length !== 3 || parts.some(isNaN)) return new Date();
+        return new Date(parts[0], parts[1] - 1, parts[2]);
+      }
+
+      // A billing cycle is keyed by the year & month of its START date (YYYY-MM).
+      // If resetDay = 15, date 2026-11-10 belongs to cycle starting 2026-10-15 (key "2026-10").
+      // Date 2026-11-15 belongs to cycle starting 2026-11-15 (key "2026-11").
+      function getCycleKeyForDate(dateObj, resetDay) {
+        let y = dateObj.getFullYear();
+        let m = dateObj.getMonth(); // 0-indexed
+        if (dateObj.getDate() < resetDay) {
+          m -= 1;
+          if (m < 0) {
+            m = 11;
+            y -= 1;
+          }
+        }
+        return `${y}-${pad2(m + 1)}`;
+      }
+
+      function shiftCycleKey(cycleKey, deltaMonths) {
+        const [y, m] = cycleKey.split('-').map(Number);
+        const d = new Date(y, (m - 1) + deltaMonths, 1);
+        return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+      }
+
+      function getCycleBounds(cycleKey, resetDay) {
+        const [y, m] = cycleKey.split('-').map(Number);
+        const start = new Date(y, m - 1, resetDay);
+        const nextStart = new Date(y, m, resetDay);
+        const end = new Date(nextStart.getFullYear(), nextStart.getMonth(), nextStart.getDate() - 1);
+        return {
+          start,
+          end,
+          startStr: toDateStr(start),
+          endStr: toDateStr(end),
+          label: `${pad2(start.getMonth() + 1)}/${pad2(start.getDate())} – ${pad2(end.getMonth() + 1)}/${pad2(end.getDate())}`,
+          fullLabel: `${start.getFullYear()}年${start.getMonth() + 1}月期`
+        };
+      }
+
+      function compareCycleKeys(a, b) {
+        return a < b ? -1 : a > b ? 1 : 0;
+      }
+
+      // Compute complete chronological rollover from earliest expense cycle up to targetCycleKey
+      function computeAllCycles(upToCycleKey) {
+        const resetDay = state.resetDay;
+        const budget = state.budget;
+        const grouped = {};
+        let earliestKey = upToCycleKey;
+
+        state.expenses.forEach(exp => {
+          const k = getCycleKeyForDate(parseDateStr(exp.date), resetDay);
+          if (!grouped[k]) grouped[k] = [];
+          grouped[k].push(exp);
+          if (compareCycleKeys(k, earliestKey) < 0) earliestKey = k;
+        });
+
+        const results = {};
+        let cursor = earliestKey;
+        let carryOverDebt = 0;
+
+        while (compareCycleKeys(cursor, upToCycleKey) <= 0) {
+          const items = grouped[cursor] || [];
+          const spent = items.reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+          const carryIn = carryOverDebt;
+          const origRemaining = budget - spent;
+          const realRemaining = budget - carryIn - spent;
+          // At cycle end: excess spending adds to debt; unspent budget pays down debt; excess savings after clearing debt does NOT roll over
+          const nextCarryOut = Math.max(0, carryIn + spent - budget);
+          const debtPaidThisCycle = carryIn > 0 && spent < budget ? Math.min(carryIn, budget - spent) : 0;
+          const savedThisCycle = Math.max(0, budget - carryIn - spent);
+
+          results[cursor] = {
+            cycleKey: cursor,
+            bounds: getCycleBounds(cursor, resetDay),
+            items,
+            spent,
+            budget,
+            carryIn,
+            origRemaining,
+            realRemaining,
+            nextCarryOut,
+            debtPaidThisCycle,
+            savedThisCycle
+          };
+
+          carryOverDebt = nextCarryOut;
+          cursor = shiftCycleKey(cursor, 1);
+        }
+
+        return results;
+      }
+
+      function fmtMoney(val, showSign) {
+        const num = Number(val) || 0;
+        const abs = Math.abs(num);
+        const formatted = abs.toLocaleString('en-US', {
+          minimumFractionDigits: Number.isInteger(abs) ? 0 : 2,
+          maximumFractionDigits: 2
+        });
+        if (num < 0) return `-HK$${formatted}`;
+        if (showSign && num > 0) return `+HK$${formatted}`;
+        return `HK$${formatted}`;
+      }
+
+      // --- Cloud Sync (Google Apps Script) ---
+      async function syncToCloud(payload) {
+        if (!state.apiUrl) {
+          state.syncStatus = 'local';
+          renderSyncBadge();
+          return;
+        }
+        state.syncStatus = 'syncing';
+        renderSyncBadge();
+        try {
+          const res = await fetch(state.apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ ...payload, pin: state.pin })
+          });
+          const data = await res.json();
+          if (data && data.ok) {
+            state.syncStatus = 'synced';
+          } else {
+            state.syncStatus = 'error';
+            showToast((data && data.error) ? `同步失敗：${data.error}` : '同步失敗，請檢查設定');
+          }
+        } catch (err) {
+          state.syncStatus = 'error';
+          showToast('無法連線至 Google Sheets，資料已暫存手機');
+        }
+        renderSyncBadge();
+      }
+
+      async function pullFromCloud() {
+        if (!state.apiUrl) {
+          showToast('目前為本地模式（尚未設定 Google Sheets 網址）');
+          return;
+        }
+        state.syncStatus = 'syncing';
+        renderSyncBadge();
+        try {
+          const url = `${state.apiUrl}?pin=${encodeURIComponent(state.pin)}`;
+          const res = await fetch(url);
+          const data = await res.json();
+          if (data && data.ok) {
+            if (Array.isArray(data.expenses)) state.expenses = data.expenses;
+            if (data.settings) {
+              if (Number(data.settings.budget) > 0) state.budget = Number(data.settings.budget);
+              if (Number(data.settings.resetDay) >= 1 && Number(data.settings.resetDay) <= 28) {
+                state.resetDay = Number(data.settings.resetDay);
+              }
+              if (data.settings.categories) {
+                try {
+                  const cats = JSON.parse(data.settings.categories);
+                  if (Array.isArray(cats) && cats.length > 0) state.categories = cats;
+                } catch (e) {}
+              }
+            }
+            saveState();
+            state.syncStatus = 'synced';
+            renderAll();
+            showToast('已與 Google Sheets 同步最新資料');
+          } else {
+            state.syncStatus = 'error';
+            showToast((data && data.error) ? `同步失敗：${data.error}` : '同步失敗，請檢查 PIN 碼');
+          }
+        } catch (err) {
+          state.syncStatus = 'error';
+          showToast('連線失敗：請確認已部署為「所有人」可存取的 Web App');
+        }
+        renderSyncBadge();
+      }
+
+      // --- UI Toast ---
+      let toastTimer = null;
+      function showToast(msg, allowUndo) {
+        const toast = document.getElementById('toast');
+        const toastMsg = document.getElementById('toast-msg');
+        const undoBtn = document.getElementById('toast-undo-btn');
+        toastMsg.textContent = msg;
+        undoBtn.classList.toggle('hidden', !allowUndo);
+        toast.classList.remove('hidden');
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          toast.classList.add('hidden');
+        }, allowUndo ? 4500 : 2800);
+      }
+
+      // --- Confirm Dialog ---
+      let confirmCallback = null;
+      function openConfirm(title, desc, onOk) {
+        document.getElementById('confirm-title').textContent = title;
+        document.getElementById('confirm-desc').textContent = desc;
+        confirmCallback = onOk;
+        document.getElementById('confirm-modal').classList.remove('hidden');
+      }
+
+      // --- Render Functions ---
+      function renderSyncBadge() {
+        const dot = document.getElementById('sync-dot');
+        const label = document.getElementById('sync-label');
+        if (state.syncStatus === 'synced') {
+          dot.className = 'w-2 h-2 rounded-full bg-emerald-500';
+          label.textContent = '已同步';
+        } else if (state.syncStatus === 'syncing') {
+          dot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-pulse';
+          label.textContent = '同步中...';
+        } else if (state.syncStatus === 'error') {
+          dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+          label.textContent = '連線異常';
+        } else {
+          dot.className = 'w-2 h-2 rounded-full bg-slate-400';
+          label.textContent = '本地模式';
+        }
+      }
+
+      function renderQuickLog() {
+        const todayKey = getCycleKeyForDate(new Date(), state.resetDay);
+        const cycles = computeAllCycles(todayKey);
+        const cur = cycles[todayKey];
+
+        document.getElementById('header-cycle-label').textContent = `本期：${cur.bounds.label}`;
+
+        const realEl = document.getElementById('kpi-real-remaining');
+        realEl.textContent = fmtMoney(cur.realRemaining);
+        if (cur.realRemaining < 0) {
+          realEl.className = 'text-2xl font-extrabold tabular-nums tracking-tight text-rose-600 mt-0.5';
+        } else if (cur.realRemaining < cur.budget * 0.2) {
+          realEl.className = 'text-2xl font-extrabold tabular-nums tracking-tight text-amber-600 mt-0.5';
+        } else {
+          realEl.className = 'text-2xl font-extrabold tabular-nums tracking-tight text-emerald-600 mt-0.5';
+        }
+
+        document.getElementById('kpi-orig-remaining').textContent = `原預算剩餘 ${fmtMoney(cur.origRemaining)}`;
+        document.getElementById('kpi-spent').textContent = fmtMoney(cur.spent);
+        document.getElementById('kpi-budget').textContent = `$${cur.budget.toLocaleString('en-US')}`;
+
+        const pct = cur.budget > 0 ? Math.min(100, (cur.spent / cur.budget) * 100) : 0;
+        const bar = document.getElementById('kpi-progress-bar');
+        bar.style.width = `${pct}%`;
+        bar.className = `h-full rounded-full transition-all duration-300 ${cur.realRemaining < 0 ? 'bg-rose-500' : pct > 80 ? 'bg-amber-500' : 'bg-emerald-500'}`;
+
+        const debtBanner = document.getElementById('debt-banner');
+        if (cur.carryIn > 0 || cur.nextCarryOut > 0) {
+          debtBanner.classList.remove('hidden');
+          const bannerText = document.getElementById('debt-banner-text');
+          const projText = document.getElementById('debt-projected-text');
+          if (cur.carryIn > 0) {
+            bannerText.textContent = `上期結轉待補預支：${fmtMoney(cur.carryIn)}`;
+            if (cur.nextCarryOut === 0) {
+              projText.textContent = '目前進度可全數抵銷 ✓';
+              projText.className = 'text-[11px] font-semibold text-emerald-600 tabular-nums';
+            } else {
+              projText.textContent = `預計下期待補 ${fmtMoney(cur.nextCarryOut)}`;
+              projText.className = 'text-[11px] font-semibold text-rose-600 tabular-nums';
+            }
+          } else {
+            bannerText.textContent = `本期已超支：${fmtMoney(cur.nextCarryOut)}`;
+            projText.textContent = '月底將結轉至下期預支';
+            projText.className = 'text-[11px] font-semibold text-rose-600 tabular-nums';
+          }
+        } else {
+          debtBanner.classList.add('hidden');
+        }
+
+        // Amount display
+        const amountVal = parseFloat(state.amountStr) || 0;
+        document.getElementById('amount-display').textContent = state.amountStr;
+        document.getElementById('quick-hint').style.opacity = amountVal > 0 ? '1' : '0';
+
+        // Category buttons
+        const grid = document.getElementById('category-grid');
+        grid.innerHTML = state.categories.map(cat => `
+          <button type="button" data-cat-id="${cat.id}"
+            class="cat-btn flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl border ${amountVal > 0 ? 'bg-white border-emerald-200 hover:border-emerald-500 hover:bg-emerald-50/50 shadow-sm' : 'bg-white border-slate-100 hover:bg-slate-50'} text-slate-800">
+            <span class="text-base leading-none">${cat.emoji}</span>
+            <span class="text-xs font-semibold truncate">${cat.name}</span>
+          </button>
+        `).join('');
+
+        grid.querySelectorAll('.cat-btn').forEach(btn => {
+          btn.addEventListener('click', () => handleQuickSave(btn.getAttribute('data-cat-id')));
+        });
+      }
+
+      function renderHistory() {
+        const todayKey = getCycleKeyForDate(new Date(), state.resetDay);
+        const targetKey = shiftCycleKey(todayKey, state.selectedCycleOffset);
+        const maxKey = compareCycleKeys(targetKey, todayKey) >= 0 ? targetKey : todayKey;
+        const cycles = computeAllCycles(maxKey);
+        const data = cycles[targetKey] || {
+          cycleKey: targetKey,
+          bounds: getCycleBounds(targetKey, state.resetDay),
+          items: [],
+          spent: 0,
+          budget: state.budget,
+          carryIn: 0,
+          origRemaining: state.budget,
+          realRemaining: state.budget,
+          nextCarryOut: 0,
+          debtPaidThisCycle: 0,
+          savedThisCycle: state.budget
+        };
+
+        const isCurrent = state.selectedCycleOffset === 0;
+        document.getElementById('hist-cycle-title').textContent = isCurrent ? `本期（${data.bounds.fullLabel}）` : data.bounds.fullLabel;
+        document.getElementById('hist-cycle-range').textContent = `${data.bounds.startStr} 至 ${data.bounds.endStr}`;
+        document.getElementById('next-cycle-btn').disabled = state.selectedCycleOffset >= 0;
+
+        const badge = document.getElementById('hist-cycle-badge');
+        badge.textContent = isCurrent ? '進行中（即時預覽）' : '已結算';
+        badge.className = isCurrent
+          ? 'text-[11px] px-2 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-700'
+          : 'text-[11px] px-2 py-0.5 rounded-full font-semibold bg-slate-100 text-slate-600';
+
+        document.getElementById('hist-budget').textContent = fmtMoney(data.budget);
+        document.getElementById('hist-spent').textContent = fmtMoney(data.spent);
+        document.getElementById('hist-carry-in').textContent = fmtMoney(data.carryIn);
+
+        const netBox = document.getElementById('hist-net-box');
+        const netLabel = document.getElementById('hist-net-label');
+        const netValue = document.getElementById('hist-net-value');
+
+        if (isCurrent) {
+          netLabel.textContent = '扣埋預支實際可使';
+          netValue.textContent = fmtMoney(data.realRemaining);
+          if (data.realRemaining < 0) {
+            netBox.className = 'bg-rose-50 rounded-xl p-2.5';
+            netLabel.className = 'text-[11px] text-rose-800';
+            netValue.className = 'text-base font-bold text-rose-600 tabular-nums mt-0.5';
+          } else {
+            netBox.className = 'bg-emerald-50/70 rounded-xl p-2.5';
+            netLabel.className = 'text-[11px] text-emerald-800';
+            netValue.className = 'text-base font-bold text-emerald-700 tabular-nums mt-0.5';
+          }
+        } else {
+          netLabel.textContent = '結轉下期待補預支';
+          netValue.textContent = fmtMoney(data.nextCarryOut);
+          if (data.nextCarryOut > 0) {
+            netBox.className = 'bg-rose-50 rounded-xl p-2.5';
+            netLabel.className = 'text-[11px] text-rose-800';
+            netValue.className = 'text-base font-bold text-rose-600 tabular-nums mt-0.5';
+          } else {
+            netBox.className = 'bg-emerald-50/70 rounded-xl p-2.5';
+            netLabel.className = 'text-[11px] text-emerald-800';
+            netValue.className = 'text-base font-bold text-emerald-700 tabular-nums mt-0.5';
+          }
+        }
+
+        // Settlement explanation sentence
+        const noteEl = document.getElementById('hist-settlement-note');
+        if (data.carryIn > 0 && data.debtPaidThisCycle > 0 && data.nextCarryOut === 0) {
+          noteEl.textContent = `本期原預算剩餘 ${fmtMoney(data.origRemaining)}，已全數抵銷 ${fmtMoney(data.carryIn)} 待補預支！多出的 ${fmtMoney(data.savedThisCycle)} 歸入儲蓄，下期維持原預算 ${fmtMoney(data.budget)}。`;
+        } else if (data.carryIn > 0 && data.debtPaidThisCycle > 0) {
+          noteEl.textContent = `本期原預算剩餘 ${fmtMoney(data.origRemaining)}，自動抵銷了 ${fmtMoney(data.debtPaidThisCycle)} 預支，餘下 ${fmtMoney(data.nextCarryOut)} 繼續結轉至下期。`;
+        } else if (data.nextCarryOut > 0) {
+          noteEl.textContent = isCurrent
+            ? `若維持目前總支出至結算日，將有 ${fmtMoney(data.nextCarryOut)} 待補預支結轉至下期。`
+            : `本期超支結算後，共有 ${fmtMoney(data.nextCarryOut)} 待補預支結轉至下期自動抵銷。`;
+        } else {
+          noteEl.textContent = `本期沒有待補預支；結算後剩餘的 ${fmtMoney(data.savedThisCycle)} 將歸入儲蓄，下期維持原預算 ${fmtMoney(data.budget)}。`;
+        }
+
+        // Category Breakdown
+        const catBox = document.getElementById('category-breakdown');
+        if (data.items.length === 0) {
+          catBox.innerHTML = '<p class="text-xs text-slate-400 text-center py-2">本期暫無開支紀錄</p>';
+        } else {
+          const totals = {};
+          data.items.forEach(it => {
+            totals[it.category] = (totals[it.category] || 0) + (Number(it.amount) || 0);
+          });
+          const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+          catBox.innerHTML = sorted.map(([catName, amt]) => {
+            const pct = data.spent > 0 ? Math.round((amt / data.spent) * 100) : 0;
+            const catObj = state.categories.find(c => c.name === catName);
+            const emoji = catObj ? catObj.emoji : '🧾';
+            return `
+              <div class="space-y-1">
+                <div class="flex justify-between text-xs">
+                  <span class="font-medium text-slate-700">${emoji} ${catName}</span>
+                  <span class="font-semibold text-slate-900 tabular-nums">${fmtMoney(amt)} <span class="text-slate-400 font-normal">(${pct}%)</span></span>
+                </div>
+                <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div class="h-full bg-emerald-500 rounded-full" style="width: ${pct}%"></div>
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+
+        // Expense List grouped by date
+        const listEl = document.getElementById('expense-list');
+        document.getElementById('hist-count').textContent = `${data.items.length} 筆`;
+        if (data.items.length === 0) {
+          listEl.innerHTML = `
+            <div class="text-center py-6 space-y-2">
+              <p class="text-xs text-slate-400">這期還沒有紀錄，去「極速記帳」記下第一筆吧！</p>
+            </div>
+          `;
+        } else {
+          const sortedItems = data.items.slice().sort((a, b) => {
+            if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+            return (a.createdAt || '') < (b.createdAt || '') ? 1 : -1;
+          });
+          const byDate = {};
+          sortedItems.forEach(it => {
+            if (!byDate[it.date]) byDate[it.date] = [];
+            byDate[it.date].push(it);
+          });
+          listEl.innerHTML = Object.entries(byDate).map(([dateStr, items]) => {
+            const daySum = items.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+            return `
+              <div>
+                <div class="flex items-center justify-between text-[11px] font-semibold text-slate-400 pb-1 border-b border-slate-100 mb-1.5">
+                  <span>${dateStr}</span>
+                  <span class="tabular-nums">共 ${fmtMoney(daySum)}</span>
+                </div>
+                <div class="space-y-1.5">
+                  ${items.map(it => {
+                    const catObj = state.categories.find(c => c.name === it.category);
+                    const emoji = catObj ? catObj.emoji : '🧾';
+                    return `
+                      <button type="button" data-edit-id="${it.id}"
+                        class="edit-item-btn w-full flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 transition text-left">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                          <span class="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-base shrink-0">${emoji}</span>
+                          <div class="min-w-0">
+                            <div class="text-xs font-semibold text-slate-800 truncate">${it.category}</div>
+                            ${it.note ? `<div class="text-[11px] text-slate-400 truncate">${escapeHtml(it.note)}</div>` : ''}
+                          </div>
+                        </div>
+                        <span class="text-sm font-bold text-slate-900 tabular-nums shrink-0 ml-2">${fmtMoney(it.amount)}</span>
+                      </button>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          listEl.querySelectorAll('.edit-item-btn').forEach(btn => {
+            btn.addEventListener('click', () => openEditModal(btn.getAttribute('data-edit-id')));
+          });
+        }
+      }
+
+      function renderSettings() {
+        document.getElementById('setting-budget').value = state.budget;
+        const resetSelect = document.getElementById('setting-reset-day');
+        if (resetSelect.options.length === 0) {
+          for (let d = 1; d <= 28; d++) {
+            const opt = document.createElement('option');
+            opt.value = String(d);
+            opt.textContent = `每月 ${d} 號`;
+            resetSelect.appendChild(opt);
+          }
+        }
+        resetSelect.value = String(state.resetDay);
+        document.getElementById('setting-api-url').value = state.apiUrl;
+        document.getElementById('setting-pin').value = state.pin;
+
+        const catList = document.getElementById('settings-cat-list');
+        catList.innerHTML = state.categories.map(cat => `
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 text-xs font-medium text-slate-800">
+            <span>${cat.emoji} ${escapeHtml(cat.name)}</span>
+            ${state.categories.length > 1 ? `<button type="button" data-del-cat="${cat.id}" class="del-cat-btn text-slate-400 hover:text-rose-600 font-bold ml-0.5">×</button>` : ''}
+          </span>
+        `).join('');
+
+        catList.querySelectorAll('.del-cat-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const id = btn.getAttribute('data-del-cat');
+            state.categories = state.categories.filter(c => c.id !== id);
+            saveState();
+            renderAll();
+            syncToCloud({ action: 'saveSettings', budget: state.budget, resetDay: state.resetDay, categories: state.categories });
+            showToast('已刪除分類');
+          });
+        });
+      }
+
+      function escapeHtml(str) {
+        return String(str || '').replace(/[&<>"']/g, m => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[m]));
+      }
+
+      function renderTabs() {
+        ['log', 'history', 'settings'].forEach(t => {
+          document.getElementById(`tab-${t}`).classList.toggle('hidden', state.activeTab !== t);
+        });
+        document.querySelectorAll('.tab-nav-btn').forEach(btn => {
+          const active = btn.getAttribute('data-tab') === state.activeTab;
+          btn.className = `tab-nav-btn flex flex-col items-center py-1 ${active ? 'text-emerald-600 font-semibold' : 'text-slate-400 font-medium'}`;
+        });
+      }
+
+      function renderAll() {
+        renderSyncBadge();
+        renderTabs();
+        renderQuickLog();
+        renderHistory();
+        renderSettings();
+      }
+
+      // --- Actions ---
+      function handleNumpad(key) {
+        let s = state.amountStr;
+        if (key === 'BACK') {
+          s = s.length > 1 ? s.slice(0, -1) : '0';
+        } else if (key === '.') {
+          if (!s.includes('.')) s += '.';
+        } else {
+          if (s === '0') {
+            s = key;
+          } else {
+            const parts = s.split('.');
+            if (parts.length === 2 && parts[1].length >= 2) return;
+            if (s.replace('.', '').length >= 7) return;
+            s += key;
+          }
+        }
+        state.amountStr = s;
+        renderQuickLog();
+      }
+
+      function handleQuickSave(catId) {
+        const amount = parseFloat(state.amountStr);
+        if (!amount || amount <= 0) {
+          showToast('請先輸入金額');
+          return;
+        }
+        const cat = state.categories.find(c => c.id === catId) || state.categories[0];
+        const noteInput = document.getElementById('note-input');
+        const dateInput = document.getElementById('date-input');
+        const expense = {
+          id: `exp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          date: dateInput.value || toDateStr(new Date()),
+          amount: Math.round(amount * 100) / 100,
+          category: cat.name,
+          note: noteInput.value.trim(),
+          createdAt: new Date().toISOString()
+        };
+
+        // Optimistic UI update
+        state.expenses.push(expense);
+        state.lastAddedId = expense.id;
+        state.amountStr = '0';
+        noteInput.value = '';
+        saveState();
+        renderAll();
+        showToast(`已記錄 ${cat.emoji} ${cat.name} ${fmtMoney(expense.amount)}`, true);
+
+        syncToCloud({ action: 'add', expense });
+      }
+
+      function openEditModal(id) {
+        const exp = state.expenses.find(e => e.id === id);
+        if (!exp) return;
+        state.editingId = id;
+        document.getElementById('edit-amount').value = exp.amount;
+        document.getElementById('edit-date').value = exp.date;
+        document.getElementById('edit-note').value = exp.note || '';
+        const catSelect = document.getElementById('edit-category');
+        const names = state.categories.map(c => c.name);
+        if (!names.includes(exp.category)) names.push(exp.category);
+        catSelect.innerHTML = names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+        catSelect.value = exp.category;
+        document.getElementById('edit-modal').classList.remove('hidden');
+      }
+
+      function loadDemoData() {
+        const today = new Date();
+        const todayKey = getCycleKeyForDate(today, state.resetDay);
+        const prevKey = shiftCycleKey(todayKey, -1);
+        const prevBounds = getCycleBounds(prevKey, state.resetDay);
+        const curBounds = getCycleBounds(todayKey, state.resetDay);
+
+        const dPrev1 = toDateStr(new Date(prevBounds.start.getFullYear(), prevBounds.start.getMonth(), prevBounds.start.getDate() + 2));
+        const dPrev2 = toDateStr(new Date(prevBounds.start.getFullYear(), prevBounds.start.getMonth(), prevBounds.start.getDate() + 10));
+        const dCur1 = toDateStr(curBounds.start);
+        const dCur2 = toDateStr(today);
+
+        state.budget = 5000;
+        state.expenses = [
+          { id: 'demo_1', date: dPrev1, amount: 3200, category: '購物', note: '上期大額購物（超支示範）', createdAt: '2026-01-01T10:00:00Z' },
+          { id: 'demo_2', date: dPrev2, amount: 2600, category: '餐飲', note: '上期日常餐飲', createdAt: '2026-01-02T10:00:00Z' },
+          { id: 'demo_3', date: dCur1, amount: 65, category: '餐飲', note: '茶餐廳午餐', createdAt: '2026-02-01T12:00:00Z' },
+          { id: 'demo_4', date: dCur2, amount: 35, category: '交通', note: '港鐵及巴士', createdAt: '2026-02-02T09:00:00Z' }
+        ];
+        state.selectedCycleOffset = 0;
+        saveState();
+        renderAll();
+        showToast('已載入示範：上期超支 $800 → 本期自動顯示扣埋預支餘額');
+      }
+
+      function exportCsv() {
+        if (state.expenses.length === 0) {
+          showToast('目前沒有可匯出的紀錄');
+          return;
+        }
+        const header = ['ID', '日期', '金額', '分類', '備註'];
+        const rows = state.expenses.map(e => [
+          e.id,
+          e.date,
+          e.amount,
+          `"${String(e.category).replace(/"/g, '""')}"`,
+          `"${String(e.note || '').replace(/"/g, '""')}"`
+        ].join(','));
+        const csv = '\uFEFF' + [header.join(','), ...rows].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `expenses_${toDateStr(new Date())}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('已匯出 CSV 檔案');
+      }
+
+      function copyText(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(() => showToast('已複製 Code.gs 程式碼')).catch(() => fallbackCopy(text));
+        } else {
+          fallbackCopy(text);
+        }
+      }
+
+      function fallbackCopy(text) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand('copy');
+          showToast('已複製 Code.gs 程式碼');
+        } catch (err) {
+          showToast('複製失敗，請手動選取文字');
+        }
+        document.body.removeChild(ta);
+      }
+
+      // --- Event Bindings ---
+      function initEvents() {
+        document.getElementById('date-input').value = toDateStr(new Date());
+        document.getElementById('gas-code-block').textContent = GAS_SOURCE_CODE;
+
+        document.querySelectorAll('.tab-nav-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            state.activeTab = btn.getAttribute('data-tab');
+            renderTabs();
+            if (state.activeTab === 'history') renderHistory();
+            if (state.activeTab === 'settings') renderSettings();
+          });
+        });
+
+        document.querySelectorAll('#numpad-grid button').forEach(btn => {
+          btn.addEventListener('click', () => handleNumpad(btn.getAttribute('data-key')));
+        });
+
+        document.getElementById('clear-amount-btn').addEventListener('click', () => {
+          state.amountStr = '0';
+          renderQuickLog();
+        });
+
+        // Keyboard support for desktop testing
+        document.addEventListener('keydown', e => {
+          if (state.activeTab !== 'log') return;
+          const tag = (document.activeElement && document.activeElement.tagName) || '';
+          if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+          if (!document.getElementById('edit-modal').classList.contains('hidden')) return;
+          if (!document.getElementById('gas-modal').classList.contains('hidden')) return;
+          if (/^[0-9]$/.test(e.key)) handleNumpad(e.key);
+          else if (e.key === '.') handleNumpad('.');
+          else if (e.key === 'Backspace') handleNumpad('BACK');
+        });
+
+        document.getElementById('sync-status-btn').addEventListener('click', () => {
+          if (state.apiUrl) {
+            pullFromCloud();
+          } else {
+            state.activeTab = 'settings';
+            renderTabs();
+            renderSettings();
+            showToast('在這裡填入 Google Apps Script 網址即可啟用雲端同步');
+          }
+        });
+
+        document.getElementById('toast-undo-btn').addEventListener('click', () => {
+          if (!state.lastAddedId) return;
+          const undoId = state.lastAddedId;
+          state.expenses = state.expenses.filter(e => e.id !== undoId);
+          state.lastAddedId = null;
+          saveState();
+          renderAll();
+          document.getElementById('toast').classList.add('hidden');
+          syncToCloud({ action: 'delete', id: undoId });
+          showToast('已復原剛剛的紀錄');
+        });
+
+        // History cycle navigation
+        document.getElementById('prev-cycle-btn').addEventListener('click', () => {
+          state.selectedCycleOffset -= 1;
+          renderHistory();
+        });
+        document.getElementById('next-cycle-btn').addEventListener('click', () => {
+          if (state.selectedCycleOffset < 0) {
+            state.selectedCycleOffset += 1;
+            renderHistory();
+          }
+        });
+
+        // Edit Modal
+        document.getElementById('close-edit-modal').addEventListener('click', () => {
+          document.getElementById('edit-modal').classList.add('hidden');
+        });
+        document.getElementById('save-edit-btn').addEventListener('click', () => {
+          const idx = state.expenses.findIndex(e => e.id === state.editingId);
+          if (idx === -1) return;
+          const amt = parseFloat(document.getElementById('edit-amount').value);
+          if (!amt || amt <= 0) {
+            showToast('金額必須大於 0');
+            return;
+          }
+          state.expenses[idx] = {
+            ...state.expenses[idx],
+            amount: Math.round(amt * 100) / 100,
+            category: document.getElementById('edit-category').value,
+            date: document.getElementById('edit-date').value,
+            note: document.getElementById('edit-note').value.trim()
+          };
+          saveState();
+          document.getElementById('edit-modal').classList.add('hidden');
+          renderAll();
+          showToast('已更新紀錄');
+          syncToCloud({ action: 'update', id: state.editingId, expense: state.expenses[idx] });
+        });
+        document.getElementById('delete-expense-btn').addEventListener('click', () => {
+          const delId = state.editingId;
+          state.expenses = state.expenses.filter(e => e.id !== delId);
+          saveState();
+          document.getElementById('edit-modal').classList.add('hidden');
+          renderAll();
+          showToast('已刪除紀錄');
+          syncToCloud({ action: 'delete', id: delId });
+        });
+
+        // Settings
+        document.getElementById('save-budget-btn').addEventListener('click', () => {
+          const b = Number(document.getElementById('setting-budget').value);
+          const rd = Number(document.getElementById('setting-reset-day').value);
+          if (!b || b <= 0) {
+            showToast('請輸入有效的每月預算');
+            return;
+          }
+          state.budget = b;
+          state.resetDay = rd;
+          saveState();
+          renderAll();
+          showToast(`已更新：每月預算 ${fmtMoney(b)}，每月 ${rd} 號結算`);
+          syncToCloud({ action: 'saveSettings', budget: state.budget, resetDay: state.resetDay, categories: state.categories });
+        });
+
+        document.getElementById('add-cat-btn').addEventListener('click', () => {
+          const emoji = document.getElementById('new-cat-emoji').value.trim() || '🏷️';
+          const name = document.getElementById('new-cat-name').value.trim();
+          if (!name) {
+            showToast('請輸入分類名稱');
+            return;
+          }
+          state.categories.push({ id: `cat_${Date.now()}`, name, emoji });
+          document.getElementById('new-cat-emoji').value = '';
+          document.getElementById('new-cat-name').value = '';
+          saveState();
+          renderAll();
+          showToast(`已新增分類「${emoji} ${name}」`);
+          syncToCloud({ action: 'saveSettings', budget: state.budget, resetDay: state.resetDay, categories: state.categories });
+        });
+
+        document.getElementById('save-sync-btn').addEventListener('click', () => {
+          const url = document.getElementById('setting-api-url').value.trim();
+          const pin = document.getElementById('setting-pin').value.trim();
+          if (url && !url.startsWith('https://')) {
+            showToast('網址必須以 https:// 開頭');
+            return;
+          }
+          state.apiUrl = url;
+          state.pin = pin;
+          saveState();
+          if (url) {
+            pullFromCloud();
+          } else {
+            state.syncStatus = 'local';
+            renderSyncBadge();
+            showToast('已切換回本地模式');
+          }
+        });
+
+        // GAS Modal
+        document.getElementById('show-gas-modal-btn').addEventListener('click', () => {
+          document.getElementById('gas-modal').classList.remove('hidden');
+        });
+        document.getElementById('close-gas-modal').addEventListener('click', () => {
+          document.getElementById('gas-modal').classList.add('hidden');
+        });
+        document.getElementById('close-gas-modal-2').addEventListener('click', () => {
+          document.getElementById('gas-modal').classList.add('hidden');
+        });
+        document.getElementById('copy-gas-btn').addEventListener('click', () => copyText(GAS_SOURCE_CODE));
+
+        // Data tools
+        document.getElementById('load-demo-btn').addEventListener('click', () => {
+          openConfirm('載入跨月預支示範？', '這會用示範紀錄覆蓋目前的本地紀錄，方便你測試「上期超支 $800 → 本期即時扣減與抵銷」效果。', loadDemoData);
+        });
+        document.getElementById('export-csv-btn').addEventListener('click', exportCsv);
+        document.getElementById('clear-data-btn').addEventListener('click', () => {
+          openConfirm('清除全部本地紀錄？', '這會清空儲存在此裝置上的開支紀錄（不會刪除 Google Sheets 上的資料）。', () => {
+            state.expenses = [];
+            saveState();
+            renderAll();
+            showToast('已清除全部本地紀錄');
+          });
+        });
+
+        // Confirm Modal
+        document.getElementById('confirm-cancel-btn').addEventListener('click', () => {
+          document.getElementById('confirm-modal').classList.add('hidden');
+          confirmCallback = null;
+        });
+        document.getElementById('confirm-ok-btn').addEventListener('click', () => {
+          document.getElementById('confirm-modal').classList.add('hidden');
+          if (confirmCallback) confirmCallback();
+          confirmCallback = null;
+        });
+      }
+
+      loadState();
+      initEvents();
+      renderAll();
+    })();
+  </script>
+</body>
+</html>
